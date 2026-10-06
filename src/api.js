@@ -1,6 +1,6 @@
 import * as offlineNLP from './nlp'
 
-const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL || 'http://localhost:8000'
+const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL || ''
 
 // Simple helper to check if backend is reachable
 let isBackendAvailable = true
