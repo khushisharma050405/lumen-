@@ -1,5 +1,17 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { findIssues, suggest, similarity, summarize, improve, generate } from './nlp'
+import {
+  checkGrammarDebounced,
+  autocompleteDebounced,
+  checkSimilarity,
+  generateContent,
+  improveContent,
+  summarizeContent,
+  loginUser,
+  signupUser,
+  createDraft,
+  deleteDraft
+} from './api'
 import { LeafIcon } from './icons'
 import { Landing } from './Landing'
 
@@ -112,7 +124,7 @@ export default function App() {
     window.scrollTo(0, 0)
   }
 
-  const save = () => {
+  const save = async () => {
     const title = text.trim().split(/[.!?\n]/)[0].slice(0, 40) || 'Untitled draft'
     const newDraft = {
       id: Date.now(),
@@ -122,30 +134,47 @@ export default function App() {
     }
     setDrafts([newDraft, ...drafts])
     say('Draft saved')
+
+    // Silently sync to backend if online
+    try {
+      await createDraft(title, text, token)
+    } catch {
+      // Offline fallback silent
+    }
+  }
+
+  const handleDeleteDraft = async (id) => {
+    setDrafts(drafts.filter((x) => x.id !== id))
+    say('Draft deleted')
+    try {
+      await deleteDraft(id, token)
+    } catch {
+      // Offline fallback silent
+    }
   }
 
   const handleAuthSuccess = async ({ mode, email, password, name }) => {
-    // Attempt backend login/signup if available; fallback smoothly
-    let signedUser = { email, name: name || email.split('@')[0] }
     try {
-      const endpoint = mode === 'signup' ? '/api/auth/signup' : '/api/auth/login'
-      const res = await fetch(`http://localhost:8000${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, name })
-      })
-      if (res.ok) {
-        const data = await res.json()
-        if (data.token) setToken(data.token)
-        if (data.user) signedUser = data.user
+      let res
+      if (mode === 'signup') {
+        res = await signupUser(email, password, name)
+      } else {
+        res = await loginUser(email, password)
+      }
+
+      if (res && res.user) {
+        setUser(res.user)
+        if (res.token) setToken(res.token)
+        say(`Welcome to Verse, ${res.user.name || 'Writer'}!`)
+        nav('write')
       }
     } catch {
-      // Offline fallback: simulate successful session
+      // Fallback
+      const fallbackUser = { email, name: name || email.split('@')[0] }
+      setUser(fallbackUser)
+      say(`Welcome to Verse, ${fallbackUser.name}!`)
+      nav('write')
     }
-
-    setUser(signedUser)
-    say(`Welcome to Verse, ${signedUser.name || 'Writer'}!`)
-    nav('write')
   }
 
   const handleLogout = () => {
@@ -237,6 +266,7 @@ export default function App() {
           drafts={drafts}
           setDrafts={setDrafts}
           setText={setText}
+          onDeleteDraft={handleDeleteDraft}
           go={nav}
           say={say}
         />
@@ -284,9 +314,43 @@ function Workspace({ text, setText, settings, save, say, initialTab = 'grammar' 
   const [tab, setTab] = useState(initialTab)
   const [atEnd, setAtEnd] = useState(true)
   const [focus, setFocus] = useState(false)
-  const issues = useMemo(() => (settings.grammar ? findIssues(text) : []), [text, settings.grammar])
-  const ghost = settings.complete && focus && atEnd ? suggest(text) : ''
+  const [issues, setIssues] = useState(() => (settings.grammar ? findIssues(text) : []))
+  const [ghost, setGhost] = useState(() => (settings.complete && focus && atEnd ? suggest(text) : ''))
   const ta = useRef()
+
+  // Real-time grammar checking with debounced API call + instant heuristic fallback
+  useEffect(() => {
+    let active = true
+    if (!settings.grammar) {
+      setIssues([])
+      return
+    }
+    // Instant heuristic fallback
+    setIssues(findIssues(text))
+    // Debounced API call
+    checkGrammarDebounced(text).then((apiIssues) => {
+      if (active && apiIssues) {
+        setIssues(apiIssues)
+      }
+    })
+    return () => { active = false }
+  }, [text, settings.grammar])
+
+  // Real-time autocomplete with debounced API call + instant heuristic fallback
+  useEffect(() => {
+    let active = true
+    if (!settings.complete || !focus || !atEnd) {
+      setGhost('')
+      return
+    }
+    setGhost(suggest(text))
+    autocompleteDebounced(text).then((s) => {
+      if (active && typeof s === 'string') {
+        setGhost(s)
+      }
+    })
+    return () => { active = false }
+  }, [text, settings.complete, focus, atEnd])
 
   const fix = (x) => setText(text.slice(0, x.start) + x.fix + text.slice(x.end))
   const fixAll = () => {
@@ -418,7 +482,19 @@ function Grammar({ issues, fix, settings }) {
 
 function Similar({ text }) {
   const [ref, setRef] = useState(REF)
-  const r = useMemo(() => similarity(text, ref), [text, ref])
+  const [r, setR] = useState(() => similarity(text, ref))
+
+  useEffect(() => {
+    let active = true
+    // Immediate fallback
+    setR(similarity(text, ref))
+    // Call API with fallback
+    checkSimilarity(text, ref).then((res) => {
+      if (active && res) setR(res)
+    })
+    return () => { active = false }
+  }, [text, ref])
+
   return (
     <>
       <label className="lbl">Source passage to compare against</label>
@@ -438,7 +514,7 @@ function Similar({ text }) {
         </div>
       ))}
       <label className="lbl">Phrases both passages share</label>
-      {r.shared.length ? (
+      {r.shared && r.shared.length ? (
         <p className="chips">
           {r.shared.map((s) => <span key={s}>{s}</span>)}
         </p>
@@ -453,6 +529,28 @@ function Generate({ text, setText, settings, say }) {
   const [prompt, setPrompt] = useState('')
   const [tone, setTone] = useState(settings.tone)
   const [out, setOut] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const handleGenerate = async () => {
+    setLoading(true)
+    try {
+      const generated = await generateContent(prompt, tone)
+      setOut(generated)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleImprove = async (mode) => {
+    setLoading(true)
+    try {
+      const improved = await improveContent(text, mode)
+      setOut(improved)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <>
       <label className="lbl">What should the paragraph be about?</label>
@@ -470,8 +568,8 @@ function Generate({ text, setText, settings, say }) {
           </button>
         ))}
       </div>
-      <button className="btn primary full" onClick={() => setOut(generate(prompt, tone))}>
-        Generate paragraph
+      <button className="btn primary full" onClick={handleGenerate} disabled={loading}>
+        {loading ? 'Generating…' : 'Generate paragraph'}
       </button>
       <label className="lbl">Or refine your whole draft</label>
       <div className="seg">
@@ -481,7 +579,7 @@ function Generate({ text, setText, settings, say }) {
           ['warm', 'Soften'],
           ['clarity', 'Split long'],
         ].map(([m, l]) => (
-          <button key={m} onClick={() => setOut(improve(text, m))}>
+          <button key={m} onClick={() => handleImprove(m)} disabled={loading}>
             {l}
           </button>
         ))}
@@ -505,9 +603,20 @@ function Generate({ text, setText, settings, say }) {
 
 function Summary({ text, settings, say }) {
   const [n, setN] = useState(settings.sumLen)
-  const s = useMemo(() => summarize(text, n), [text, n])
+  const [s, setS] = useState(() => summarize(text, n))
+
+  useEffect(() => {
+    let active = true
+    setS(summarize(text, n))
+    summarizeContent(text, n).then((res) => {
+      if (active && Array.isArray(res)) setS(res)
+    })
+    return () => { active = false }
+  }, [text, n])
+
   const sum = s.join(' ')
   const pct = text.length ? Math.max(0, Math.round(100 - (sum.length / text.length) * 100)) : 0
+
   return (
     <>
       <label className="lbl">Length: {n} sentence{n > 1 ? 's' : ''}</label>
@@ -531,7 +640,7 @@ function Summary({ text, settings, say }) {
   )
 }
 
-function History({ drafts, setDrafts, setText, go, say }) {
+function History({ drafts, setDrafts, setText, onDeleteDraft, go, say }) {
   const [q, setQ] = useState('')
   const list = drafts.filter((d) => (d.title + d.text).toLowerCase().includes(q.toLowerCase()))
   return (
@@ -555,7 +664,17 @@ function History({ drafts, setDrafts, setText, go, say }) {
               <button className="btn primary" onClick={() => { setText(d.text); go('write') }}>
                 Open
               </button>
-              <button className="btn" onClick={() => { setDrafts(drafts.filter((x) => x.id !== d.id)); say('Draft deleted') }}>
+              <button
+                className="btn"
+                onClick={() => {
+                  if (onDeleteDraft) {
+                    onDeleteDraft(d.id)
+                  } else {
+                    setDrafts(drafts.filter((x) => x.id !== d.id))
+                    say('Draft deleted')
+                  }
+                }}
+              >
                 Delete
               </button>
             </div>
