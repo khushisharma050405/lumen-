@@ -65,6 +65,27 @@ export function Landing({ go, initialMode = 'login', onAuthSuccess, user, onLogo
   const [loading, setLoading] = useState(false)
   const [authError, setAuthError] = useState('')
 
+  const [highlightCard, setHighlightCard] = useState(false)
+
+  const handleGetStarted = (e) => {
+    e?.preventDefault()
+    if (user) {
+      go('write')
+      return
+    }
+    go('login')
+    setHighlightCard(true)
+    setTimeout(() => {
+      const card = document.getElementById('auth-card')
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        const input = card.querySelector('input')
+        if (input) input.focus()
+      }
+    }, 60)
+    setTimeout(() => setHighlightCard(false), 1800)
+  }
+
   const handleAuthSubmit = async (e) => {
     e.preventDefault()
     setAuthError('')
@@ -118,7 +139,7 @@ export function Landing({ go, initialMode = 'login', onAuthSuccess, user, onLogo
             <div className="hero-actions">
               <button
                 className="btn btn-sage pill-cta"
-                onClick={() => go('write')}
+                onClick={handleGetStarted}
                 id="get-started-cta"
               >
                 Get Started →
@@ -191,7 +212,7 @@ export function Landing({ go, initialMode = 'login', onAuthSuccess, user, onLogo
 
         {/* Right Column: 24px-Radius Login / Signup Card */}
         <div className="hero-right-column">
-          <div className="auth-card" id="auth-card">
+          <div className={`auth-card ${highlightCard ? 'highlight-focus' : ''}`} id="auth-card">
             {user ? (
               <div className="auth-user-signed-in">
                 <div className="auth-card-header">

@@ -1615,6 +1615,27 @@ input[type=range] {
   position: sticky;
   top: 90px;
   z-index: 5;
+  transition: all 0.3s ease;
+}
+
+@keyframes authCardPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(55, 72, 59, 0.45), 0 20px 48px -10px rgba(25, 35, 28, 0.16);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(55, 72, 59, 0.22), 0 26px 56px -10px rgba(25, 35, 28, 0.24);
+    transform: scale(1.02);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(55, 72, 59, 0), 0 20px 48px -10px rgba(25, 35, 28, 0.16);
+    transform: scale(1);
+  }
+}
+
+.auth-card.highlight-focus {
+  animation: authCardPulse 1.2s cubic-bezier(0.16, 1, 0.3, 1);
+  border-color: var(--verse-sage-dark) !important;
 }
 
 .auth-card-header {
