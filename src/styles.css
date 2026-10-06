@@ -304,7 +304,6 @@ mark {
   max-width: 1320px;
   margin: 0 auto;
   padding: 28px clamp(16px, 3.5vw, 44px) 64px;
-  animation: fade 0.4s ease both;
 }
 
 .toolbar {
@@ -619,7 +618,6 @@ input[type=range] {
   max-width: 820px;
   margin: 0 auto;
   padding: 48px clamp(16px, 4vw, 36px) 80px;
-  animation: fade 0.5s both;
 }
 
 .narrow h1 {
@@ -745,12 +743,12 @@ input[type=range] {
 
 /* Animations */
 @keyframes rise {
-  from { opacity: 0; transform: translateY(16px); }
+  from { opacity: 0.95; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes fade {
-  from { opacity: 0; }
+  from { opacity: 0.95; }
   to { opacity: 1; }
 }
 
