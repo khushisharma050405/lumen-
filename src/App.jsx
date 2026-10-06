@@ -4,9 +4,11 @@ import {
   checkGrammarDebounced,
   autocompleteDebounced,
   checkSimilarity,
+  checkParaphrase,
   generateContent,
   improveContent,
   summarizeContent,
+  checkBackendHealth,
   loginUser,
   signupUser,
   createDraft,
@@ -165,14 +167,14 @@ export default function App() {
       if (res && res.user) {
         setUser(res.user)
         if (res.token) setToken(res.token)
-        say(`Welcome to Verse, ${res.user.name || 'Writer'}!`)
+        say(`Welcome to Lumen, ${res.user.name || 'Writer'}!`)
         nav('write')
       }
     } catch {
       // Fallback
       const fallbackUser = { email, name: name || email.split('@')[0] }
       setUser(fallbackUser)
-      say(`Welcome to Verse, ${fallbackUser.name}!`)
+      say(`Welcome to Lumen, ${fallbackUser.name}!`)
       nav('write')
     }
   }
@@ -188,9 +190,9 @@ export default function App() {
     <div className="app">
       {/* Top Navbar */}
       <header className="top">
-        <button className="brand" onClick={() => nav('landing')} aria-label="Verse Home">
+        <button className="brand" onClick={() => nav('landing')} aria-label="Lumen Home">
           <LeafIcon size={24} />
-          <span>V E R S E</span>
+          <span>L U M E N</span>
         </button>
 
         <nav>
@@ -287,10 +289,10 @@ export default function App() {
             <div className="auth-leaf-wrapper">
               <LeafIcon size={32} />
             </div>
-            <h2>About Verse</h2>
+            <h2>About Lumen</h2>
             <p>
-              Verse is a calm, intelligent writing sanctuary designed to elevate your craft without distraction.
-              Combining gentle real-time assistance with deep stylistic refinement, Verse helps you write with precision and resonance.
+              Lumen is a calm, intelligent writing sanctuary designed to elevate your craft without distraction.
+              Combining gentle real-time assistance with deep stylistic refinement, Lumen helps you write with precision and resonance.
             </p>
             <div className="about-stats-row">
               <div><b>6</b><span>Core Tools</span></div>
@@ -312,11 +314,35 @@ export default function App() {
 
 function Workspace({ text, setText, settings, save, say, initialTab = 'grammar' }) {
   const [tab, setTab] = useState(initialTab)
+  const [selectedIssueId, setSelectedIssueId] = useState(null)
   const [atEnd, setAtEnd] = useState(true)
   const [focus, setFocus] = useState(false)
   const [issues, setIssues] = useState(() => (settings.grammar ? findIssues(text) : []))
   const [ghost, setGhost] = useState(() => (settings.complete && focus && atEnd ? suggest(text) : ''))
   const ta = useRef()
+
+  // Generate and Big Output Board state
+  const [topic, setTopic] = useState('mother')
+  const [tone, setTone] = useState('Warm')
+  const [length, setLength] = useState('Medium')
+  const [generatedText, setGeneratedText] = useState('')
+  const [displayedText, setDisplayedText] = useState('')
+  const [isTyping, setIsTyping] = useState(false)
+  const [boardMeta, setBoardMeta] = useState({ topic: 'Mother', tone: 'Warm', length: 'Medium' })
+  const [hasGenerated, setHasGenerated] = useState(false)
+  const [undoText, setUndoText] = useState(null)
+  const [genLoading, setGenLoading] = useState(false)
+  const typingTimerRef = useRef(null)
+
+  useEffect(() => {
+    return () => {
+      if (typingTimerRef.current) clearInterval(typingTimerRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (initialTab) setTab(initialTab)
+  }, [initialTab])
 
   // Real-time grammar checking with debounced API call + instant heuristic fallback
   useEffect(() => {
@@ -352,18 +378,168 @@ function Workspace({ text, setText, settings, save, say, initialTab = 'grammar' 
     return () => { active = false }
   }, [text, settings.complete, focus, atEnd])
 
-  const fix = (x) => setText(text.slice(0, x.start) + x.fix + text.slice(x.end))
+  const fix = (x) => {
+    setText(text.slice(0, x.start) + x.fix + text.slice(x.end))
+    setSelectedIssueId(null)
+  }
+
   const fixAll = () => {
     let t = text
     ;[...issues].reverse().forEach((x) => (t = t.slice(0, x.start) + x.fix + t.slice(x.end)))
     setText(t)
+    setSelectedIssueId(null)
     say(`${issues.length} fixes applied`)
+  }
+
+  const highlightIssue = (x) => {
+    setSelectedIssueId(x.id)
+    if (ta.current) {
+      ta.current.focus()
+      ta.current.setSelectionRange(x.start, x.end)
+    }
+  }
+
+  const startTyping = (fullText, meta) => {
+    if (typingTimerRef.current) {
+      clearInterval(typingTimerRef.current)
+      typingTimerRef.current = null
+    }
+    setHasGenerated(true)
+    setGeneratedText(fullText)
+    setBoardMeta(meta)
+    setDisplayedText('')
+    setIsTyping(true)
+    setGenLoading(true)
+
+    const wordsList = fullText.split(' ')
+    let index = 0
+
+    typingTimerRef.current = setInterval(() => {
+      index++
+      if (index <= wordsList.length) {
+        setDisplayedText(wordsList.slice(0, index).join(' '))
+      }
+      if (index >= wordsList.length) {
+        clearInterval(typingTimerRef.current)
+        typingTimerRef.current = null
+        setIsTyping(false)
+        setGenLoading(false)
+      }
+    }, 16)
+  }
+
+  const handleGenerate = async (genTopic, genTone, genLength) => {
+    const t = (genTopic !== undefined ? genTopic : topic).trim()
+    const tn = genTone || tone || 'Warm'
+    const ln = genLength || length || 'Medium'
+
+    setGenLoading(true)
+    try {
+      const res = await generateContent(t || 'A thoughtful observation', tn, ln, text.slice(-500))
+      if (!res || !res.ok) {
+        if (res?.unreachable) {
+          say('Generation needs the backend running.')
+        } else {
+          say(res?.message || 'Generation failed.')
+        }
+        setGenLoading(false)
+        return
+      }
+      const capTopic = t ? t.charAt(0).toUpperCase() + t.slice(1) : 'Original'
+      startTyping(res.text, { topic: capTopic, tone: tn, length: ln })
+    } catch (err) {
+      const health = await checkBackendHealth()
+      if (!health) {
+        say('Generation needs the backend running.')
+      } else {
+        say(err?.message || 'Generation failed.')
+      }
+      setGenLoading(false)
+    }
+  }
+
+  const handleImprove = async (mode) => {
+    setGenLoading(true)
+    const modeLabels = {
+      tighten: 'Tighten',
+      formalize: 'Formalize',
+      soften: 'Soften',
+      'split long': 'Split long'
+    }
+    const label = modeLabels[mode.toLowerCase()] || mode
+    try {
+      const res = await improveContent(text, mode)
+      if (!res || !res.ok) {
+        if (res?.unreachable) {
+          say('Generation needs the backend running.')
+        } else {
+          say(res?.message || 'Refinement failed.')
+        }
+        setGenLoading(false)
+        return
+      }
+      startTyping(res.text, { topic: 'Refine', tone: label, length: 'Draft' })
+    } catch (err) {
+      const health = await checkBackendHealth()
+      if (!health) {
+        say('Generation needs the backend running.')
+      } else {
+        say(err?.message || 'Refinement failed.')
+      }
+      setGenLoading(false)
+    }
+  }
+
+  const handleInsert = () => {
+    if (!generatedText) return
+    setUndoText(text)
+    const addition = generatedText.trim()
+    const newText = text.trim() ? text.replace(/\s*$/, '') + '\n\n' + addition : addition
+    setText(newText)
+    say('Inserted into draft')
+  }
+
+  const handleReplace = () => {
+    if (!generatedText) return
+    setUndoText(text)
+    setText(generatedText.trim())
+    say('Draft replaced')
+  }
+
+  const handleUndo = () => {
+    if (undoText === null) return
+    setText(undoText)
+    setUndoText(null)
+    say('Draft restored')
+  }
+
+  const handleCopy = () => {
+    if (!generatedText) return
+    navigator.clipboard?.writeText(generatedText)
+    say('Copied to clipboard')
+  }
+
+  const handleRegenerate = () => {
+    if (genLoading) return
+    if (boardMeta.topic === 'Refine') {
+      handleImprove(boardMeta.tone)
+    } else {
+      handleGenerate(topic, tone, length)
+    }
   }
 
   const parts = []
   let i = 0
   issues.forEach((x) => {
-    parts.push(text.slice(i, x.start), <mark key={x.id}>{text.slice(x.start, x.end) || ' '}</mark>)
+    parts.push(
+      text.slice(i, x.start),
+      <mark
+        key={x.id}
+        className={selectedIssueId === x.id ? 'active-highlight' : ''}
+      >
+        {text.slice(x.start, x.end) || ' '}
+      </mark>
+    )
     i = x.end
   })
   parts.push(text.slice(i))
@@ -385,10 +561,15 @@ function Workspace({ text, setText, settings, save, say, initialTab = 'grammar' 
           <button onClick={() => { navigator.clipboard?.writeText(text); say('Copied to clipboard') }}>
             Copy
           </button>
-          <button onClick={() => { setText(''); ta.current?.focus() }}>
+          {undoText !== null && (
+            <button onClick={handleUndo} className="btn-undo">
+              Undo generation
+            </button>
+          )}
+          <button onClick={() => { setText(''); setSelectedIssueId(null); ta.current?.focus() }}>
             Clear
           </button>
-          <button onClick={() => setText(SAMPLE)}>
+          <button onClick={() => { setText(SAMPLE); setSelectedIssueId(null) }}>
             Sample
           </button>
           <span className="count">
@@ -429,13 +610,57 @@ function Workspace({ text, setText, settings, save, say, initialTab = 'grammar' 
             'Suggestions appear automatically when cursor is at the end of your draft.'
           )}
         </p>
+
+        {/* Big Output Board below Editor */}
+        {hasGenerated && (
+          <div className="generated-board" id="generated-board">
+            <div className="board-header">
+              <div className="board-header-left">
+                <span className="board-title">Generated paragraph</span>
+                {boardMeta.topic && (
+                  <span className="board-chip chip-topic">{boardMeta.topic}</span>
+                )}
+                {boardMeta.tone && (
+                  <span className="board-chip chip-tone">{boardMeta.tone}</span>
+                )}
+                {boardMeta.length && (
+                  <span className="board-chip chip-length">{boardMeta.length}</span>
+                )}
+              </div>
+              <span className="board-word-count">{words(displayedText)} words</span>
+            </div>
+
+            <div className="board-body">
+              <p className="board-text">
+                {displayedText}
+                {isTyping && <span className="blinking-caret">|</span>}
+              </p>
+            </div>
+
+            <div className="board-footer">
+              <button className="btn btn-sage pill-cta" onClick={handleInsert}>
+                Insert into draft
+              </button>
+              <button className="btn pill-btn" onClick={handleReplace}>
+                Replace draft
+              </button>
+              <button className="btn pill-btn" onClick={handleRegenerate} disabled={genLoading}>
+                Regenerate
+              </button>
+              <button className="btn pill-btn" onClick={handleCopy}>
+                Copy
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
       <aside className="side">
         <div className="tabs" role="tablist">
           {[
             ['grammar', 'Grammar'],
-            ['similar', 'Similarity'],
+            ['paraphrase', 'Paraphrase'],
+            ['similarity', 'Similarity'],
             ['generate', 'Generate'],
             ['summary', 'Summary'],
           ].map(([k, l]) => (
@@ -451,9 +676,31 @@ function Workspace({ text, setText, settings, save, say, initialTab = 'grammar' 
           ))}
         </div>
         <div className="panel" key={tab}>
-          {tab === 'grammar' && <Grammar {...{ issues, fix, settings }} />}
-          {tab === 'similar' && <Similar text={text} />}
-          {tab === 'generate' && <Generate {...{ text, setText, settings, say }} />}
+          {tab === 'grammar' && (
+            <Grammar
+              issues={issues}
+              fix={fix}
+              settings={settings}
+              text={text}
+              onHighlight={highlightIssue}
+              selectedIssueId={selectedIssueId}
+            />
+          )}
+          {tab === 'paraphrase' && <Paraphrase text={text} />}
+          {tab === 'similarity' && <Similarity text={text} />}
+          {tab === 'generate' && (
+            <GenerateControls
+              topic={topic}
+              setTopic={setTopic}
+              tone={tone}
+              setTone={setTone}
+              length={length}
+              setLength={setLength}
+              onGenerate={handleGenerate}
+              onImprove={handleImprove}
+              loading={genLoading}
+            />
+          )}
           {tab === 'summary' && <Summary {...{ text, settings, say }} />}
         </div>
       </aside>
@@ -461,143 +708,285 @@ function Workspace({ text, setText, settings, save, say, initialTab = 'grammar' 
   )
 }
 
-function Grammar({ issues, fix, settings }) {
+function Grammar({ issues, fix, settings, text, onHighlight, selectedIssueId }) {
   if (!settings.grammar) return <p className="muted">Grammar autocorrect is off. Turn it on in Settings.</p>
   if (!issues.length) return <p className="muted">No issues found. Your draft reads clean and sharp.</p>
   return (
     <ul className="issues">
-      {issues.map((x) => (
-        <li key={x.id}>
-          <div>
-            <small>{x.msg}</small>
-          </div>
-          <button onClick={() => fix(x)}>
-            Apply: “{x.fix.trim() || 'single space'}”
-          </button>
-        </li>
-      ))}
+      {issues.map((x) => {
+        const orig = text.slice(x.start, x.end) || ' '
+        const isSel = selectedIssueId === x.id
+        return (
+          <li
+            key={x.id}
+            className={'issue-item' + (isSel ? ' selected' : '')}
+            onClick={() => onHighlight && onHighlight(x)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === 'Enter' && onHighlight) onHighlight(x) }}
+          >
+            <div className="issue-info">
+              <div className="grammar-change">
+                <span className="grammar-orig">{orig}</span>
+                <span className="grammar-arrow">→</span>
+                <span className="grammar-fix">{x.fix.trim() || 'space'}</span>
+              </div>
+              <small className="grammar-cat">{x.msg}</small>
+            </div>
+            <button
+              className="btn-apply-fix"
+              onClick={(e) => {
+                e.stopPropagation()
+                fix(x)
+              }}
+              title="Apply correction"
+            >
+              Apply
+            </button>
+          </li>
+        )
+      })}
     </ul>
   )
 }
 
-function Similar({ text }) {
-  const [ref, setRef] = useState(REF)
-  const [r, setR] = useState(() => similarity(text, ref))
+function Paraphrase({ text }) {
+  const [source, setSource] = useState(text)
+  const [compare, setCompare] = useState('')
+  const [r, setR] = useState(null)
 
   useEffect(() => {
+    setSource(text)
+  }, [text])
+
+  useEffect(() => {
+    if (!compare.trim() || !source.trim()) {
+      setR(null)
+      return
+    }
     let active = true
-    // Immediate fallback
-    setR(similarity(text, ref))
-    // Call API with fallback
-    checkSimilarity(text, ref).then((res) => {
+    setR(similarity(source, compare))
+    checkParaphrase(source, compare).then((res) => {
       if (active && res) setR(res)
     })
     return () => { active = false }
-  }, [text, ref])
+  }, [source, compare])
 
   return (
     <>
-      <label className="lbl">Source passage to compare against</label>
-      <textarea className="box" rows={5} value={ref} onChange={(e) => setRef(e.target.value)} />
-      <div className="verdict">
-        <b>{r.verdict}</b>
-        <span>{r.score}% overall match</span>
-      </div>
-      {[
-        ['Meaning overlap', r.sem],
-        ['Exact phrasing', r.lex],
-      ].map(([l, v]) => (
-        <div className="meter" key={l}>
-          <span>{l}</span>
-          <i><u style={{ width: v + '%' }} /></i>
-          <em>{v}%</em>
+      <label className="lbl">Your text</label>
+      <textarea
+        className="box"
+        rows={4}
+        value={source}
+        onChange={(e) => setSource(e.target.value)}
+        placeholder="Enter your text"
+      />
+
+      <label className="lbl" style={{ marginTop: '14px' }}>Compare with</label>
+      <textarea
+        className="box"
+        rows={4}
+        value={compare}
+        onChange={(e) => setCompare(e.target.value)}
+        placeholder="Paste the passage to compare"
+      />
+
+      {!compare.trim() ? (
+        <div className="empty-state-box">
+          <p className="muted">Paste the passage to compare above to detect paraphrasing.</p>
         </div>
-      ))}
-      <label className="lbl">Phrases both passages share</label>
-      {r.shared && r.shared.length ? (
-        <p className="chips">
-          {r.shared.map((s) => <span key={s}>{s}</span>)}
-        </p>
-      ) : (
-        <p className="muted">No shared phrases.</p>
-      )}
+      ) : r ? (
+        <div className="paraphrase-result-card">
+          <div className="paraphrase-header-row">
+            <span className={`verdict-badge verdict-${(r.verdict || '').toLowerCase().replace(/\s+/g, '-')}`}>
+              {r.verdict}
+            </span>
+            <span className="confidence-pill">{r.score}% confidence</span>
+          </div>
+          <p className="verdict-reason">{r.reason}</p>
+        </div>
+      ) : null}
     </>
   )
 }
 
-function Generate({ text, setText, settings, say }) {
-  const [prompt, setPrompt] = useState('')
-  const [tone, setTone] = useState(settings.tone)
-  const [out, setOut] = useState('')
-  const [loading, setLoading] = useState(false)
+function Similarity({ text }) {
+  const [source, setSource] = useState(text)
+  const [compare, setCompare] = useState('')
+  const [r, setR] = useState(null)
 
-  const handleGenerate = async () => {
-    setLoading(true)
-    try {
-      const generated = await generateContent(prompt, tone)
-      setOut(generated)
-    } finally {
-      setLoading(false)
-    }
-  }
+  useEffect(() => {
+    setSource(text)
+  }, [text])
 
-  const handleImprove = async (mode) => {
-    setLoading(true)
-    try {
-      const improved = await improveContent(text, mode)
-      setOut(improved)
-    } finally {
-      setLoading(false)
+  useEffect(() => {
+    if (!compare.trim() || !source.trim()) {
+      setR(null)
+      return
     }
-  }
+    let active = true
+    setR(similarity(source, compare))
+    checkSimilarity(source, compare).then((res) => {
+      if (active && res) setR(res)
+    })
+    return () => { active = false }
+  }, [source, compare])
 
   return (
     <>
-      <label className="lbl">What should the paragraph be about?</label>
-      <input
+      <label className="lbl">Your text</label>
+      <textarea
         className="box"
-        value={prompt}
-        placeholder="e.g. revising a first draft"
-        onChange={(e) => setPrompt(e.target.value)}
+        rows={4}
+        value={source}
+        onChange={(e) => setSource(e.target.value)}
+        placeholder="Enter your text"
       />
+
+      <label className="lbl" style={{ marginTop: '14px' }}>Compare with</label>
+      <textarea
+        className="box"
+        rows={4}
+        value={compare}
+        onChange={(e) => setCompare(e.target.value)}
+        placeholder="Paste the passage to compare"
+      />
+
+      {!compare.trim() ? (
+        <div className="empty-state-box">
+          <p className="muted">Paste the passage to compare above to view similarity metrics.</p>
+        </div>
+      ) : r ? (
+        <div className="similarity-results-card">
+          <div className="similarity-overall-row">
+            <span className="similarity-score-num">{r.score}%</span>
+            <span className="similarity-score-label">overall match</span>
+          </div>
+          {[
+            ['Meaning overlap', r.sem],
+            ['Exact phrasing', r.lex],
+          ].map(([l, v]) => (
+            <div className="meter" key={l}>
+              <span>{l}</span>
+              <i><u style={{ width: (v || 0) + '%' }} /></i>
+              <em>{v || 0}%</em>
+            </div>
+          ))}
+          <label className="lbl" style={{ marginTop: '14px' }}>Phrases both passages share</label>
+          {r.shared && r.shared.length ? (
+            <p className="chips">
+              {r.shared.map((s) => <span key={s}>{s}</span>)}
+            </p>
+          ) : (
+            <p className="muted">No shared phrases.</p>
+          )}
+          {r.sharedWords && r.sharedWords.length ? (
+            <>
+              <label className="lbl" style={{ marginTop: '14px' }}>Shared key words</label>
+              <p className="chips">
+                {r.sharedWords.map((w) => <span key={w} className="chip-word">{w}</span>)}
+              </p>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </>
+  )
+}
+
+function GenerateControls({
+  topic,
+  setTopic,
+  tone,
+  setTone,
+  length,
+  setLength,
+  onGenerate,
+  onImprove,
+  loading
+}) {
+  const tones = ['Warm', 'Formal', 'Concise']
+  const lengths = [
+    { id: 'Short', label: 'Short', desc: 'Short (2-3 sentences)' },
+    { id: 'Medium', label: 'Medium', desc: 'Medium (4-5 sentences)' },
+    { id: 'Long', label: 'Long', desc: 'Long (6-8 sentences)' }
+  ]
+  const refines = [
+    { id: 'tighten', label: 'Tighten' },
+    { id: 'formalize', label: 'Formalize' },
+    { id: 'soften', label: 'Soften' },
+    { id: 'split long', label: 'Split long' }
+  ]
+
+  return (
+    <div className="generate-panel">
+      <label className="lbl">What should it be about?</label>
+      <input
+        className="box pill-input"
+        value={topic}
+        placeholder="e.g. mother, black holes..."
+        onChange={(e) => setTopic(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !loading) {
+            onGenerate(topic, tone, length)
+          }
+        }}
+      />
+
       <label className="lbl">Tone</label>
-      <div className="seg">
-        {['formal', 'concise', 'warm'].map((t) => (
-          <button key={t} className={tone === t ? 'on' : ''} onClick={() => setTone(t)}>
+      <div className="pill-group">
+        {tones.map((t) => (
+          <button
+            key={t}
+            type="button"
+            className={'pill-choice' + (tone === t ? ' selected' : '')}
+            onClick={() => setTone(t)}
+          >
             {t}
           </button>
         ))}
       </div>
-      <button className="btn primary full" onClick={handleGenerate} disabled={loading}>
-        {loading ? 'Generating…' : 'Generate paragraph'}
-      </button>
-      <label className="lbl">Or refine your whole draft</label>
-      <div className="seg">
-        {[
-          ['concise', 'Tighten'],
-          ['formal', 'Formalize'],
-          ['warm', 'Soften'],
-          ['clarity', 'Split long'],
-        ].map(([m, l]) => (
-          <button key={m} onClick={() => handleImprove(m)} disabled={loading}>
-            {l}
+
+      <label className="lbl">Length</label>
+      <div className="pill-group">
+        {lengths.map((l) => (
+          <button
+            key={l.id}
+            type="button"
+            title={l.desc}
+            className={'pill-choice' + (length === l.id ? ' selected' : '')}
+            onClick={() => setLength(l.id)}
+          >
+            {l.label}
           </button>
         ))}
       </div>
-      {out && (
-        <div className="result">
-          <p>{out}</p>
-          <div className="row">
-            <button className="btn primary" onClick={() => { setText(out); say('Draft replaced') }}>
-              Replace draft
-            </button>
-            <button className="btn" onClick={() => { setText(text.replace(/\s*$/, '') + '\n\n' + out); say('Added to draft') }}>
-              Add below
-            </button>
-          </div>
-        </div>
-      )}
-    </>
+
+      <button
+        type="button"
+        className="btn-generate-main"
+        onClick={() => onGenerate(topic, tone, length)}
+        disabled={loading}
+      >
+        {loading ? 'Generating…' : 'Generate paragraph'}
+      </button>
+
+      <label className="lbl" style={{ marginTop: '22px' }}>Refine your draft</label>
+      <div className="refine-chips-grid">
+        {refines.map((r) => (
+          <button
+            key={r.id}
+            type="button"
+            className="refine-chip"
+            onClick={() => onImprove(r.id)}
+            disabled={loading}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 

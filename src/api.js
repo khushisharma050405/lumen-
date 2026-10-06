@@ -118,40 +118,100 @@ export async function checkParaphrase(text, reference) {
     is_paraphrase: sim.verdict === 'Near-duplicate' || sim.verdict === 'Likely paraphrase',
     score: sim.score,
     verdict: sim.verdict,
+    reason: sim.reason,
     shared_phrases: sim.shared,
+    sharedWords: sim.sharedWords,
     sem: sim.sem,
     lex: sim.lex
   }
 }
 
-export async function generateContent(prompt, tone) {
+export async function checkBackendHealth() {
   try {
-    const data = await safeFetch('/api/generate', {
-      method: 'POST',
-      body: JSON.stringify({ prompt, tone })
-    })
-    if (data && typeof data.text === 'string') {
-      return data.text
-    }
+    const res = await fetch(`${API_BASE_URL}/api/health`)
+    if (!res.ok) return null
+    return await res.json()
   } catch {
-    // Silent fallback
+    return null
   }
-  return offlineNLP.generate(prompt, tone)
 }
 
-export async function improveContent(text, mode) {
+export async function generateContent(topic, tone = 'Warm', length = 'Medium', existing_text = '') {
+  const controller = new AbortController()
+  const id = setTimeout(() => controller.abort(), 40000)
+
   try {
-    const data = await safeFetch('/api/improve', {
+    const res = await fetch(`${API_BASE_URL}/api/generate`, {
       method: 'POST',
-      body: JSON.stringify({ text, mode })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic, tone, length, existing_text }),
+      signal: controller.signal
     })
-    if (data && typeof data.text === 'string') {
-      return data.text
+    clearTimeout(id)
+
+    if (!res.ok) {
+      let detailMsg = `HTTP ${res.status}`
+      try {
+        const errJson = await res.json()
+        if (errJson && errJson.detail) {
+          detailMsg = typeof errJson.detail === 'string' ? errJson.detail : JSON.stringify(errJson.detail)
+        }
+      } catch {}
+      return { ok: false, status: res.status, message: detailMsg, unreachable: false }
     }
-  } catch {
-    // Silent fallback
+
+    const data = await res.json()
+    if (data && typeof data.text === 'string' && data.text.trim()) {
+      return { ok: true, text: data.text.trim() }
+    }
+    return { ok: false, status: 502, message: 'Invalid response from model', unreachable: false }
+  } catch (err) {
+    clearTimeout(id)
+    const health = await checkBackendHealth()
+    if (!health) {
+      return { ok: false, status: 0, message: 'Generation needs the backend running.', unreachable: true }
+    }
+    return { ok: false, status: 500, message: err?.message || 'Request failed', unreachable: false }
   }
-  return offlineNLP.improve(text, mode)
+}
+
+export async function improveContent(text, mode = 'tighten') {
+  const controller = new AbortController()
+  const id = setTimeout(() => controller.abort(), 40000)
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/improve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, mode }),
+      signal: controller.signal
+    })
+    clearTimeout(id)
+
+    if (!res.ok) {
+      let detailMsg = `HTTP ${res.status}`
+      try {
+        const errJson = await res.json()
+        if (errJson && errJson.detail) {
+          detailMsg = typeof errJson.detail === 'string' ? errJson.detail : JSON.stringify(errJson.detail)
+        }
+      } catch {}
+      return { ok: false, status: res.status, message: detailMsg, unreachable: false }
+    }
+
+    const data = await res.json()
+    if (data && typeof data.text === 'string' && data.text.trim()) {
+      return { ok: true, text: data.text.trim() }
+    }
+    return { ok: false, status: 502, message: 'Invalid response from model', unreachable: false }
+  } catch (err) {
+    clearTimeout(id)
+    const health = await checkBackendHealth()
+    if (!health) {
+      return { ok: false, status: 0, message: 'Generation needs the backend running.', unreachable: true }
+    }
+    return { ok: false, status: 500, message: err?.message || 'Request failed', unreachable: false }
+  }
 }
 
 export async function summarizeContent(text, sentences = 3) {

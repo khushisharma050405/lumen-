@@ -9,7 +9,6 @@ export const FEATURES = [
     id: 'grammar',
     tab: 'grammar',
     title: 'Grammar Autocorrector',
-    count: 5,
     desc: 'Fix errors, improve clarity.',
     bgClass: 'tile-peach',
     Icon: SparklesIcon
@@ -18,25 +17,22 @@ export const FEATURES = [
     id: 'complete',
     tab: 'grammar',
     title: 'Sentence Autocomplete',
-    count: 8,
     desc: 'Complete your thoughts.',
     bgClass: 'tile-mint',
     Icon: DocIcon
   },
   {
     id: 'paraphrase',
-    tab: 'similar',
+    tab: 'paraphrase',
     title: 'Paraphrase Detection',
-    count: 27,
     desc: 'Find and rephrase similar content.',
     bgClass: 'tile-lavender',
     Icon: InfinityIcon
   },
   {
     id: 'similar',
-    tab: 'similar',
+    tab: 'similarity',
     title: 'Text Similarity',
-    count: 28,
     desc: 'Check similarity between texts.',
     bgClass: 'tile-sand',
     Icon: LinkIcon
@@ -45,7 +41,6 @@ export const FEATURES = [
     id: 'generate',
     tab: 'generate',
     title: 'Text Generation',
-    count: 20,
     desc: 'Create new content from your ideas.',
     bgClass: 'tile-sky',
     Icon: PencilIcon
@@ -54,7 +49,6 @@ export const FEATURES = [
     id: 'summarize',
     tab: 'summary',
     title: 'Text Summarization',
-    count: 4,
     desc: 'Turn long text into key points.',
     bgClass: 'tile-rose',
     Icon: MenuLinesIcon
@@ -93,8 +87,8 @@ export function Landing({ go, initialMode = 'login', onAuthSuccess, user, onLogo
       if (onAuthSuccess) {
         await onAuthSuccess({
           mode: 'google',
-          email: 'writer@verse.ai',
-          name: 'Verse Writer'
+          email: 'writer@lumen.ai',
+          name: 'Lumen Writer'
         })
       }
     } catch (err) {
@@ -133,10 +127,10 @@ export function Landing({ go, initialMode = 'login', onAuthSuccess, user, onLogo
           </header>
 
           {/* Center Visual Scene with Floating Demo Chips */}
-          <div className="hero-visual-scene" aria-label="Verse writing desk specimen">
+          <div className="hero-visual-scene" aria-label="Lumen writing desk specimen">
             <img
               src="/verse_hero_bg.jpg"
-              alt="Verse aesthetic writing desk with books and plants"
+              alt="Lumen aesthetic writing desk with books and plants"
               className="scene-photo"
               loading="eager"
             />
@@ -167,7 +161,7 @@ export function Landing({ go, initialMode = 'login', onAuthSuccess, user, onLogo
             <div className="sparkle-star star-2" aria-hidden="true">✧</div>
           </div>
 
-          {/* Six Feature Strip along the bottom */}
+          {/* Six Feature Strip along the bottom: Aligned to same baseline with no bracketed numbers */}
           <section className="features-strip" id="features" aria-label="Writing Assistant Features">
             {FEATURES.map((f) => {
               const { Icon } = f
@@ -186,7 +180,6 @@ export function Landing({ go, initialMode = 'login', onAuthSuccess, user, onLogo
                   <div className="tile-content">
                     <div className="tile-title-row">
                       <span className="tile-title">{f.title}</span>
-                      <span className="tile-count">({f.count})</span>
                     </div>
                     <p className="tile-desc">{f.desc}</p>
                   </div>
@@ -208,7 +201,7 @@ export function Landing({ go, initialMode = 'login', onAuthSuccess, user, onLogo
                   <h2>Welcome back,</h2>
                   <p className="auth-subhead">{user.name || user.email}</p>
                 </div>
-                <p className="auth-info-text">You are signed in to Verse AI. Continue refining your drafts or start a new essay.</p>
+                <p className="auth-info-text">You are signed in to Lumen. Continue refining your drafts or start a new piece.</p>
                 <button className="btn btn-sage pill-cta full-btn" onClick={() => go('write')}>
                   Open Editor →
                 </button>
@@ -224,7 +217,7 @@ export function Landing({ go, initialMode = 'login', onAuthSuccess, user, onLogo
                   </div>
                   <h2>{authMode === 'login' ? 'Welcome back' : 'Create account'}</h2>
                   <p className="auth-subhead">
-                    {authMode === 'login' ? 'Continue your writing journey.' : 'Begin your journey with Verse.'}
+                    {authMode === 'login' ? 'Continue your writing journey.' : 'Begin your journey with Lumen.'}
                   </p>
                 </div>
 

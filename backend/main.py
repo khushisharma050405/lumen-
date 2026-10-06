@@ -1,9 +1,18 @@
 import datetime
 import os
+import sys
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
+from dotenv import load_dotenv
+
+# Load backend/.env at startup
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(env_path):
+    load_dotenv(env_path, override=True)
+else:
+    load_dotenv(override=True)
 
 from auth import (
     USERS_DB, hash_password, verify_password,
@@ -11,12 +20,13 @@ from auth import (
 )
 from nlp_service import (
     check_grammar, get_autocomplete, compute_similarity,
-    check_paraphrase, generate_paragraph, improve_text, summarize_text
+    check_paraphrase, generate_paragraph, generate_paragraph_llm,
+    improve_text, improve_text_llm, summarize_text, LLMProviderError
 )
 
 app = FastAPI(
-    title="Verse AI Writing Assistant API",
-    description="Backend API powering the Verse editorial workspace: NLP services, JWT auth, and drafts management.",
+    title="Lumen AI Writing Assistant API",
+    description="Backend API powering the Lumen editorial workspace: NLP services, JWT auth, and drafts management.",
     version="1.0.0"
 )
 
@@ -51,19 +61,26 @@ class SimilarityResponse(BaseModel):
     lex: int
     score: int
     verdict: str
+    reason: Optional[str] = None
     shared: List[str]
+    sharedWords: Optional[List[str]] = []
 
 class ParaphraseResponse(BaseModel):
     is_paraphrase: bool
     score: int
     verdict: str
+    reason: Optional[str] = None
     shared_phrases: List[str]
+    sharedWords: Optional[List[str]] = []
     sem: int
     lex: int
 
 class GenerateRequest(BaseModel):
+    topic: Optional[str] = ""
     prompt: Optional[str] = ""
-    tone: Optional[str] = "formal"
+    tone: Optional[str] = "Warm"
+    length: Optional[str] = "Medium"
+    existing_text: Optional[str] = ""
 
 class GenerateResponse(BaseModel):
     text: str
@@ -128,12 +145,12 @@ DRAFTS_DB: List[Dict[str, Any]] = [
 # ----------------------------------------------------------------------
 
 @app.get("/api/health")
-def health_check():
+def health_endpoint():
+    api_key = os.getenv("LLM_API_KEY", "")
+    model = os.getenv("LLM_MODEL", "")
     return {
-        "status": "healthy",
-        "brand": "Verse",
-        "version": "1.0.0",
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        "llm_configured": bool(api_key.strip()),
+        "model": model
     }
 
 @app.post("/api/grammar", response_model=GrammarResponse)
@@ -158,13 +175,37 @@ def paraphrase_endpoint(req: SimilarityRequest):
 
 @app.post("/api/generate", response_model=GenerateResponse)
 def generate_endpoint(req: GenerateRequest):
-    generated = generate_paragraph(req.prompt or "", req.tone or "formal")
-    return {"text": generated}
+    topic = req.topic or req.prompt or ""
+    try:
+        generated = generate_paragraph_llm(
+            topic=topic,
+            tone=req.tone or "Warm",
+            length=req.length or "Medium",
+            existing_text=req.existing_text or ""
+        )
+        return {"text": generated}
+    except LLMProviderError as e:
+        raise HTTPException(
+            status_code=e.status_code if 400 <= e.status_code < 600 else 502,
+            detail=e.message
+        )
+    except Exception as e:
+        print(f"[Generate Error] {str(e)}", file=sys.stderr, flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/improve", response_model=ImproveResponse)
 def improve_endpoint(req: ImproveRequest):
-    improved = improve_text(req.text, req.mode)
-    return {"text": improved}
+    try:
+        improved = improve_text_llm(req.text, req.mode or "tighten")
+        return {"text": improved}
+    except LLMProviderError as e:
+        raise HTTPException(
+            status_code=e.status_code if 400 <= e.status_code < 600 else 502,
+            detail=e.message
+        )
+    except Exception as e:
+        print(f"[Improve Error] {str(e)}", file=sys.stderr, flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/summarize", response_model=SummarizeResponse)
 def summarize_endpoint(req: SummarizeRequest):
