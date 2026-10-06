@@ -1,4 +1,4 @@
-# Verse — AI Writing Assistant
+# LUMEN — AI Writing Assistant
 
 Verse is a calm, focused, and elegant AI writing companion re-themed and engineered to match the editorial "Verse" design system: cream backgrounds, sage-green pill buttons, pastel icon tiles, high-contrast serif typography with italic accents, 24px-radius cards, soft elevation shadows, and a leaf emblem.
 
